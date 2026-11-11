@@ -1,4 +1,4 @@
-import React, {  useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Loading from "../components/Loading";
 import UserProgfileInfo from "../components/UserProgfileInfo";
@@ -9,6 +9,7 @@ import { useSelector } from "react-redux";
 import  {useAuth} from "@clerk/clerk-react"
 import toast from "react-hot-toast";
 import api from "../api/axios.js"
+import { useRealtimeEvent, useRealtimeRoom } from "../realtime/RealtimeProvider.jsx";
 
 const ProfileOther = () => {
 
@@ -20,37 +21,66 @@ const ProfileOther = () => {
   const [posts, setPosts] = useState([]);
   const [activeTab, setActiveTab] = useState("posts");
   const [edit, setEdit] = useState(false);
-  const [toProfileData,setToProfileData]=useState(null)  
+  const [connectionStatus, setConnectionStatus] = useState("none");
+  const targetProfileId = profileId || currentUser?._id;
 
-
-  const fetchUser = async (profileId) => {
-    const token=await getToken()
+  const fetchProfile = useCallback(async () => {
+    if (!targetProfileId) return;
     try {
-      const {data}=await api.post("/api/user/profile",{profileId},{headers:{Authorization:`Bearer ${token}`}})
-      // console.log("data:",data)
-      if(data.success){
-        // toast.success(data.message)
-        setUser(data.profile)
+      const token = await getToken();
+      const { data } = await api.post(
+          "/api/user/profile",
+          { profileId: targetProfileId },
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+      if (data.success) {
+        setUser(data.profile);
         setPosts(data.posts);
-        setToProfileData(data)
-      }else {
-        toast.error(data.message)
+        setConnectionStatus(data.connectionStatus || "none");
+      } else {
+        toast.error(data.message);
       }
     } catch (error) {
-      toast.error(error.message)
+      toast.error(error.message);
     }
-  };
+  }, [getToken, targetProfileId]);
+
+  useRealtimeRoom(targetProfileId ? `profile:${targetProfileId}` : null);
+  useRealtimeEvent("profile:updated", (updatedUser) => {
+    if (updatedUser._id === targetProfileId) setUser(updatedUser);
+  });
+  useRealtimeEvent("social:updated", ({ userIds }) => {
+    if (userIds.includes(targetProfileId)) fetchProfile();
+  });
+  useRealtimeEvent("post:created", (post) => {
+    const authorId = post.user?._id || post.user;
+    if (authorId === targetProfileId) {
+      setPosts((current) =>
+        current.some((item) => item._id === post._id)
+          ? current
+          : [post, ...current],
+      );
+    }
+  });
+  useRealtimeEvent("post:updated", ({ postId, ...changes }) => {
+    setPosts((current) =>
+      current.map((post) =>
+        post._id === postId ? { ...post, ...changes } : post,
+      ),
+    );
+  });
+  useRealtimeEvent("post:deleted", ({ postId }) => {
+    setPosts((current) => current.filter((post) => post._id !== postId));
+  });
+  useRealtimeEvent("connect", fetchProfile);
+
   useEffect(() => {
-    if(profileId){
-      fetchUser(profileId)
-    }
-    else {
-      fetchUser(currentUser._id)
-    }
-  }, [profileId,currentUser] );
+    const timer = window.setTimeout(fetchProfile, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchProfile]);
 
   return user ? (
-    <div className="relative h-full  overflow-y-scroll bg-gray-50 p-6">
+    <div className="relative min-h-full bg-gray-50 p-4 sm:p-6">
       <div className="max-w-3xl  mx-auto">
         {/* Profile card*/}
         <div className="bg-white rounded-2xl shadow overflow-hidden">
@@ -69,11 +99,13 @@ const ProfileOther = () => {
           </div>
           {/* userinfo */}
           <UserProgfileInfo
+            key={`${user._id}:${connectionStatus}:${user.followers.length}`}
             user={user}
             posts={posts}
             profileId={profileId || ""}
             setEdit={setEdit}
             currentUser={currentUser}
+            initialConnectionStatus={connectionStatus}
           />
         </div>  
          
@@ -95,7 +127,7 @@ const ProfileOther = () => {
           {/* posts */}
            {activeTab==="posts" && (
             <div className="mt-6 flex  flex-col items-center gap-6">
-              {posts.map((post)=><Postcard key={post._id} post={post}/>)}
+              {posts.map((post)=><Postcard key={post._id} post={post} onDelete={(postId) => setPosts((current) => current.filter((item) => item._id !== postId))}/>)}
             </div>
            )}
 

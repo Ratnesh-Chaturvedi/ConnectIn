@@ -6,6 +6,13 @@ import imagekit from "../config/imageKit.js";
 import Connection from "../models/connection.model.js";
 import Post from "../models/post.model.js";
 import { inngest } from "../inngest/index.js";
+import { emitToRooms, emitToSocialRooms } from "../realtime/socket.js";
+
+const emitSocialChange = (userIds) => {
+  const ids = [...new Set(userIds.filter(Boolean).map((id) => id.toString()))];
+  const payload = { userIds: ids };
+  emitToSocialRooms(ids, "social:updated", payload);
+};
 
 
 // controller to get the userData using userID
@@ -103,6 +110,12 @@ const updateUserData = async (req, res) => {
       new: true,
     });
 
+    emitToRooms(
+      [`user:${userId}`, `profile:${userId}`, "directory"],
+      "profile:updated",
+      updatedUser,
+    );
+
     return res.status(200).json({
       success: true,
       user: updatedUser,
@@ -123,18 +136,32 @@ const discoverUser = async (req, res) => {
   try {
     const { userId } = req.auth();
     const { input } = req.body;
+    const searchTerm = input?.trim();
 
-    const allUsers = await User.find({
+    if (!searchTerm) {
+      return res.status(200).json({
+        success: true,
+        message: "No search term provided",
+        filteredUsers: [],
+      });
+    }
+
+    const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchPattern = new RegExp(escapedSearchTerm, "i");
+
+    const filteredUsers = await User.find({
+      _id: { $ne: userId },
       $or: [
-        { username: new RegExp(input, "i") },
-        { email: new RegExp(input, "i") },
-        { location: new RegExp(input, "i") },
-        { full_name: new RegExp(input, "i") },
+        { username: searchPattern },
+        { email: searchPattern },
+        { location: searchPattern },
+        { full_name: searchPattern },
+        { bio: searchPattern },
       ],
-    });
-
-    // now we show all the user expect the loggedin user
-    const filteredUsers = allUsers.filter((user) => user._id !== userId);
+    })
+      .select("-__v")
+      .limit(30)
+      .lean();
 
     return res
       .status(200)
@@ -170,6 +197,8 @@ const followUser = async (req, res) => {
     followedUser.followers.push(userId);
     await followedUser.save();
 
+    emitSocialChange([userId, id]);
+
     return res.status(200).json({
       success: true,
       message: "Now you are following this user",
@@ -198,6 +227,8 @@ const UnfollowUser = async (req, res) => {
     followedUser.followers = followedUser.followers.filter(uid =>uid !== userId);
     await followedUser.save();
 
+    emitSocialChange([userId, id]);
+
     return res.status(200).json({
       success: true,
       message: "Unfollwed successfully",
@@ -222,7 +253,7 @@ const sendConnectionRequest = async (req, res) => {
     const last24hour = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const cnnectionRequests = await Connection.find({
       from_user_id: userId,
-      created_at: { $gt: last24hour },
+      createdAt: { $gt: last24hour },
     });
     if (cnnectionRequests.length > 20) {
      return res.status(404).json({success:false,message:"You can't send more than 20 request in 24 hours"})
@@ -276,6 +307,13 @@ const getAllConnections = async (req, res) => {
       "connections followers following",
     );
 
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
     const connections = user.connections;
     const followers = user.followers;
     const following = user.following;
@@ -309,20 +347,21 @@ const acceptConnectionRequest = async (req, res) => {
     const connection = await Connection.findOne({
       from_user_id: id,
       to_user_id: userId,
+      status: "pending",
     });
 
     if (!connection) {
       return res.status(400).json({success:false,message:"Connection not found"})
     }
-    const user = await User.findById(userId);
-    user.connections.push(id);
-    await user.save();
-    const toUser = await User.findById(id);
-    toUser.connections.push(userId);
-    await toUser.save();
+    await Promise.all([
+      User.findByIdAndUpdate(userId, { $addToSet: { connections: id } }),
+      User.findByIdAndUpdate(id, { $addToSet: { connections: userId } }),
+    ]);
 
     connection.status = "accepted";
     await connection.save();
+
+    emitSocialChange([userId, id]);
 
     return res.json({
       success: true,
@@ -348,12 +387,32 @@ const getUserProfile = async (req, res) => {
         .json({ success: false, message: "USer profile not found" });
     }
     const posts = await Post.find({ user: profileId }).populate("user");
+    const connection = await Connection.findOne({
+      $or: [
+        { from_user_id: userId, to_user_id: profileId },
+        { from_user_id: profileId, to_user_id: userId },
+      ],
+    }).select("from_user_id status");
+
+    let connectionStatus = "none";
+    if (
+      profile.connections.includes(userId) ||
+      connection?.status === "accepted"
+    ) {
+      connectionStatus = "connected";
+    } else if (connection?.status === "pending") {
+      connectionStatus =
+        connection.from_user_id === userId
+          ? "outgoing_pending"
+          : "incoming_pending";
+    }
 
     return res.status(200).json({
       success: true,
       message: "Profile and posts fetched",
       profile,
       posts,
+      connectionStatus,
     });
   } catch (error) {
     console.log(error);
@@ -402,6 +461,8 @@ const removeConnection = async (req, res) => {
         { from_user_id: profileId, to_user_id: userId },
       ],
     });
+
+    emitSocialChange([userId, profileId]);
 
     return res.status(200).json({
       success: true,
@@ -479,6 +540,8 @@ const toggleFollow = async (req, res) => {
     // Save both users
     await user.save();
     await profileUser.save();
+
+    emitSocialChange([userId, profileId]);
 
     return res.status(200).json({ success: true, message: "Success" });
   } catch (error) {

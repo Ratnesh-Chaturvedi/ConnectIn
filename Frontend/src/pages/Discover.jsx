@@ -1,55 +1,80 @@
 import React, { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, UserRoundSearch } from "lucide-react";
 import UserCard from "../components/UserCard.jsx";
 import Loading from "../components/Loading.jsx";
 import api from "../api/axios.js";
 import { useAuth } from "@clerk/clerk-react";
 import toast from "react-hot-toast";
-import { useDispatch, useSelector } from "react-redux";
-import { fetchUser } from "../features/users/userSlice.js";
+import { useRealtimeEvent, useRealtimeRoom } from "../realtime/RealtimeProvider.jsx";
 
 const Discover = () => {
   const { getToken } = useAuth();
-  const currentUser = useSelector((state) => state.user.value);
-  const dispatch = useDispatch();
 
   const [input, setInput] = useState("");
   const [searchUsers, setSearchUsers] = useState([]);
   const [randomUsers, setRandomUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [randomLoading, setRandomLoading] = useState(true);
 
-  // Fetch random users
-  const fetchRandomUsers = async () => {
-    try {
-      setLoading(true);
-      const token = await getToken();
-      const { data } = await api.get("/api/user/random", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+  useRealtimeRoom("directory");
+  useRealtimeEvent("profile:updated", (updatedUser) => {
+    const updateList = (users) =>
+      users.map((user) => (user._id === updatedUser._id ? updatedUser : user));
+    setSearchUsers(updateList);
+    setRandomUsers(updateList);
+  });
 
-      if (data.success) {
-        setRandomUsers(data.users);
-      } else {
-        toast.error(data.message);
-      }
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setLoading(false);
-    }
+  const handleInputChange = (event) => {
+    const value = event.target.value;
+    setInput(value);
+    setSearchUsers([]);
+    setSearching(Boolean(value.trim()));
   };
 
-  // Search users by input
-  const handleSearch = async (e) => {
-    if (e.key === "Enter") {
+  useEffect(() => {
+    let active = true;
+
+    getToken()
+      .then((token) =>
+        api.get("/api/user/random", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      )
+      .then(({ data }) => {
+        if (!active) return;
+        if (data.success) {
+          setRandomUsers(data.users);
+        } else {
+          toast.error(data.message);
+        }
+      })
+      .catch((error) => {
+        if (active) toast.error(error.message);
+      })
+      .finally(() => {
+        if (active) setRandomLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [getToken]);
+
+  useEffect(() => {
+    const query = input.trim();
+    if (!query) return undefined;
+
+    const controller = new AbortController();
+    const debounceTimer = window.setTimeout(async () => {
       try {
-        setSearchUsers([]);
-        setLoading(true);
         const token = await getToken();
         const { data } = await api.post(
           "/api/user/discover",
-          { input },
-          { headers: { Authorization: `Bearer ${token}` } }
+          { input: query },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+          },
         );
 
         if (data.success) {
@@ -58,24 +83,27 @@ const Discover = () => {
           toast.error(data.message);
         }
       } catch (error) {
-        toast.error(error.message);
+        if (error.code !== "ERR_CANCELED") {
+          toast.error(error.message);
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setSearching(false);
       }
-    }
-  };
+    }, 400);
 
-  // Load current user and random users on mount
-  useEffect(() => {
-    getToken().then((token) => {
-      dispatch(fetchUser(token));
-    });
-    fetchRandomUsers();
-  }, []);
+    return () => {
+      window.clearTimeout(debounceTimer);
+      controller.abort();
+    };
+  }, [getToken, input]);
+
+  const isSearching = Boolean(input.trim());
+  const visibleUsers = isSearching ? searchUsers : randomUsers;
+  const loading = isSearching ? searching : randomLoading;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
-      <div className="max-w-6xl mx-auto p-6">
+    <div className="min-h-full bg-slate-50">
+      <div className="max-w-6xl mx-auto px-4 py-8 sm:px-6">
         {/* Title */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">
@@ -94,24 +122,30 @@ const Discover = () => {
               <input
                 type="text"
                 placeholder="Search people by name, username, bio, location"
-                className="pl-10 sm:pl-12 py-2 w-full border-gray-300 rounded-md max-sm:text-sm"
-                onChange={(e) => setInput(e.target.value)}
+                className="w-full rounded-md border border-gray-300 py-2 pl-10 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:pl-12 max-sm:text-sm"
+                onChange={handleInputChange}
                 value={input}
-                onKeyUp={handleSearch}
               />
             </div>
           </div>
         </div>
 
         {/* Users List */}
-        <div className="flex flex-wrap gap-6">
-          {searchUsers.length > 0
-            ? searchUsers.map((user) => <UserCard key={user._id} user={user} />)
-            : randomUsers.map((user) => <UserCard key={user._id} user={user} />)}
-        </div>
-
-        {/* Loading */}
-        {loading && <Loading height="60vh" />}
+        {loading ? (
+          <Loading height="40vh" />
+        ) : visibleUsers.length > 0 ? (
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {visibleUsers.map((user) => (
+              <UserCard key={user._id} user={user} />
+            ))}
+          </div>
+        ) : isSearching ? (
+          <div className="flex min-h-64 flex-col items-center justify-center text-center text-slate-500">
+            <UserRoundSearch className="mb-3 size-10 text-slate-400" />
+            <p className="font-medium text-slate-700">No users found</p>
+            <p className="mt-1 text-sm">Try another name, username, or location.</p>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 import dotenv, { configDotenv } from "dotenv"
+import dns from "node:dns";
  dotenv.config()
+
+if (process.platform === "win32") {
+    dns.setServers(["1.1.1.1", "8.8.8.8"])
+}
 
 const DB_NAME="ConnectIn"
 

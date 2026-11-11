@@ -1,5 +1,5 @@
-import React, { useRef, useState } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import React from "react";
+import { Routes, Route } from "react-router-dom";
 import Connection from "./pages/Connection";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
@@ -10,13 +10,11 @@ import Discover from "./pages/Discover";
 import ChatBox from "./pages/ChatBox";
 import { useUser, useAuth } from "@clerk/clerk-react";
 import Layout from "./pages/Layout";
-import { Toaster ,toast } from "react-hot-toast";
+import { Toaster } from "react-hot-toast";
 import { useEffect } from "react";
 import { useDispatch } from "react-redux";
 import { fetchUser } from "./features/users/userSlice.js";
 import { fetchConnections } from "./features/connections/connectionSlice.js";
-import { addMessages } from "./features/messages/messageSlice.js";
-import Notification from "./components/Notification.jsx";
 import ProfileOther from "./pages/ProfileOther.jsx";
 import { CommentPage } from "./pages/CommentPage.jsx";
 
@@ -26,10 +24,6 @@ const App = () => {
   const { getToken } = useAuth();
 
   const dispatch = useDispatch();
-
-  //  we are doing this to get the message instantly
-  const { pathname } = useLocation();
-  const pathnameRef = useRef(pathname);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -42,33 +36,6 @@ const App = () => {
     };
     fetchData();
   }, [user, getToken, dispatch]);
-
-  useEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
-
-  useEffect(() => {
-    if (user) {
-      const eventSource = new EventSource(
-        import.meta.env.VITE_BACKEND_URL + "/api/message/" + user.id,
-      );
-
-      eventSource.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        if (pathnameRef.current === "/messages/" + message.from_user_id._id) {
-          dispatch(addMessages(message));
-        } else {
-          // we will add the notification component
-          toast.custom((t)=>(
-            <Notification t={t} message={message}/>
-          ),{position:"bottom-right"})
-        }
-      };
-      return () => {
-        eventSource.close();
-      };
-    }
-  }, [user, dispatch]);
 
   return (
     <>

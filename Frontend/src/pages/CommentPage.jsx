@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import api from "../api/axios.js";
 import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import moment from "moment";
+import { useRealtimeEvent, useRealtimeRoom } from "../realtime/RealtimeProvider.jsx";
 
 export const CommentPage = () => {
   const { postId } = useParams();
@@ -15,9 +16,11 @@ export const CommentPage = () => {
   const [post, setPost] = useState(null);
   const [content, setContent] = useState("");
 
+  useRealtimeRoom(postId ? `post:${postId}` : null);
+
   const closeModal = () => navigate(-1);
 
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     try {
       const token = await getToken();
       const { data } = await api.get(`/api/comment/get/${postId}`, {
@@ -26,22 +29,47 @@ export const CommentPage = () => {
       if (data.success) {
         setComments(data.allComments.comments);
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to load comments");
     }
-  };
+  }, [getToken, postId]);
 
-  const fetchPost = async () => {
+  const fetchPost = useCallback(async () => {
     try {
       const token = await getToken();
       const { data } = await api.get(`/api/post/single/${postId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (data.success) setPost(data.post);
-    } catch (error) {
+    } catch {
       toast.error("Failed to load post");
     }
-  };
+  }, [getToken, postId]);
+
+  useRealtimeEvent("comment:created", (comment) => {
+    setComments((current) =>
+      current.some((item) => item._id === comment._id)
+        ? current
+        : [...current, comment],
+    );
+  });
+  useRealtimeEvent("comment:deleted", ({ commentId }) => {
+    setComments((current) =>
+      current.filter((comment) => comment._id !== commentId),
+    );
+  });
+  useRealtimeEvent("post:updated", ({ postId: updatedPostId, ...changes }) => {
+    if (updatedPostId === postId) {
+      setPost((current) => (current ? { ...current, ...changes } : current));
+    }
+  });
+  useRealtimeEvent("post:deleted", ({ postId: deletedPostId }) => {
+    if (deletedPostId === postId) navigate(-1);
+  });
+  useRealtimeEvent("connect", () => {
+    fetchComments();
+    fetchPost();
+  });
 
   const addComment = async () => {
     if (!content.trim()) return;
@@ -76,17 +104,19 @@ export const CommentPage = () => {
         toast.success("Comment deleted");
      
       }
-    } catch (error) {
+    } catch {
       toast.error("Error deleting comment");
     }
   };
 
   useEffect(() => {
-    if (postId) {
+    const timer = window.setTimeout(() => {
+      if (!postId) return;
       fetchComments();
       fetchPost();
-    }
-  }, [postId]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchComments, fetchPost, postId]);
 
   return (
     <div
