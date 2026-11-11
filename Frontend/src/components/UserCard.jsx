@@ -1,5 +1,4 @@
 import React from "react";
-import { dummyUserData } from "../assets/assets";
 import { MapPin, MessageCircle, Plus, UserPlus } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import {useAuth} from "@clerk/clerk-react"
@@ -34,7 +33,7 @@ const UserCard = ({ user }) => {
 
 
   const handleConnectionRequest = async () => {
-   if(currentUser.connections.includes(user._id)){
+    if (currentUser?.connections?.includes(user._id)) {
     return navigate('/messages/'+ user._id);
    }
 
@@ -58,7 +57,7 @@ const UserCard = ({ user }) => {
   return (
     <div
       key={user._id}
-      className=" p-4 pt-6 flex flex-col justify-between w-72  shadow  border border-gray-200 rounded-md"
+      className="flex w-full min-w-0 flex-col justify-between rounded-md border border-gray-200 bg-white p-4 pt-6 shadow"
       
     >
       <div className="text-center" onClick={()=>navigate(`/profile/${user._id}`)}>
@@ -92,7 +91,7 @@ const UserCard = ({ user }) => {
       <div className="flex mt-4 gap-2">
         {/* follow btn */}
         <button
-          disabled={currentUser?.following.includes(user._id)}
+          disabled={currentUser?.following?.includes(user._id)}
           onClick={handleFollow}
           className="w-full py-2  rounded-md flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600  active:scale-95 transition text-white cursor-pointer"
         >

@@ -1,5 +1,8 @@
 import {
   Calendar,
+  Check,
+  Clock3,
+  LoaderCircle,
   MapPin,
   MessageCircle,
   PenBox,
@@ -7,322 +10,299 @@ import {
   UserPlus,
   UserRoundX,
   Verified,
-  MoreVertical,
 } from "lucide-react";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import moment from "moment";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
+import { useDispatch } from "react-redux";
 import api from "../api/axios.js";
+import { fetchConnections } from "../features/connections/connectionSlice.js";
+import { fetchUser } from "../features/users/userSlice.js";
 
-const UserProgfileInfo = ({ user, posts, profileId, setEdit, currentUser }) => {
+const UserProgfileInfo = ({
+  user,
+  posts,
+  profileId,
+  setEdit,
+  currentUser,
+  initialConnectionStatus = "none",
+}) => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const { getToken } = useAuth();
 
-  const [isConnected, setIsConnected] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [isPendingRequest, setIsPendingRequest] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState(
+    initialConnectionStatus,
+  );
+  const [isFollowing, setIsFollowing] = useState(
+    user.followers?.includes(currentUser?._id) || false,
+  );
+  const [activeAction, setActiveAction] = useState(null);
 
-  useEffect(() => {
-    if (currentUser) {
-      setIsConnected(user.connections.includes(currentUser._id));
-      setIsFollowing(user.followers.includes(currentUser._id));
-    }
-  }, [user, currentUser]);
+  const showError = (error) => {
+    toast.error(error.response?.data?.message || error.message);
+  };
 
-  // Connect to user
   const handleConnectionRequest = async () => {
     try {
+      setActiveAction("connect");
       const token = await getToken();
       const { data } = await api.post(
         "/api/user/connect",
         { id: profileId },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      if (data.success) {
-        toast.success("Request send");
-        setIsPendingRequest(true);
-      } else {
+      if (!data.success) {
         toast.error(data.message);
+        return;
       }
+
+      setConnectionStatus("outgoing_pending");
+      toast.success("Connection request sent");
     } catch (error) {
-      toast.error(error.message);
+      showError(error);
+    } finally {
+      setActiveAction(null);
     }
   };
 
-  // Disconnect
+  const acceptConnectionRequest = async () => {
+    try {
+      setActiveAction("accept");
+      const token = await getToken();
+      const { data } = await api.post(
+        "/api/user/accept",
+        { id: profileId },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      if (!data.success) {
+        toast.error(data.message);
+        return;
+      }
+
+      setConnectionStatus("connected");
+      dispatch(fetchConnections(token));
+      toast.success(data.message);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
   const disconnect = async () => {
     try {
+      setActiveAction("disconnect");
       const token = await getToken();
       const { data } = await api.patch(
         `/api/user/disconnect/${profileId}`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      if (data.success) {
-        toast.success(data.message);
-        setIsConnected(false);
-      } else {
+      if (!data.success) {
         toast.error(data.message);
+        return;
       }
+
+      setConnectionStatus("none");
+      dispatch(fetchConnections(token));
+      toast.success(data.message);
     } catch (error) {
-      toast.error(error.message);
+      showError(error);
+    } finally {
+      setActiveAction(null);
     }
   };
 
-  // Follow / Unfollow
   const toggleFollow = async () => {
     try {
+      setActiveAction("follow");
       const token = await getToken();
       const { data } = await api.patch(
         `/api/user/togglefollow/${profileId}`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      if (data.success) {
-        toast.success(data.message);
-        setIsFollowing((prev) => !prev);
-      } else {
+      if (!data.success) {
         toast.error(data.message);
+        return;
       }
+
+      setIsFollowing((value) => !value);
+      dispatch(fetchUser(token));
+      toast.success(data.message);
     } catch (error) {
-      toast.error(error.message);
+      showError(error);
+    } finally {
+      setActiveAction(null);
     }
   };
 
+  const ActionIcon = ({ action, children }) =>
+    activeAction === action ? (
+      <LoaderCircle className="size-4 animate-spin" />
+    ) : (
+      children
+    );
+
   return (
-    <div className="relative py-4 px-6 md:px-8 bg-white">
-      <div className="flex flex-col md:flex-row items-start gap-6">
-        {/* Profile Picture */}
-        <div className="w-32 h-32 border-4 border-white shadow-lg absolute -top-16 rounded-full">
+    <div className="relative bg-white px-5 py-5 sm:px-8">
+      <div className="flex flex-col items-start gap-6 md:flex-row">
+        <div className="absolute -top-16 size-32 rounded-full border-4 border-white shadow-lg">
           <img
             src={user.profile_picture}
-            alt="Profile"
-            className="absolute rounded-full z-2 h-full w-full object-cover"
+            alt={`${user.full_name}'s profile`}
+            className="size-full rounded-full object-cover"
           />
         </div>
 
-        <div className="w-full pt-15 md:pt-0 md:pl-36">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row items-start justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-gray-900">
+        <div className="w-full pt-14 md:pl-36 md:pt-0">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="break-words text-2xl font-bold text-gray-900">
                   {user.full_name}
                 </h1>
-                <Verified className="w-6 h-6 text-indigo-600" />
+                <Verified className="size-5 shrink-0 text-indigo-600" />
               </div>
               <p className="text-gray-500">
-                {user.username ? `@${user.username}` : `add a username`}
+                {user.username ? `@${user.username}` : "Add a username"}
               </p>
             </div>
 
-            {/* Edit Button */}
-            {!profileId && (
+            {!profileId ? (
               <button
+                type="button"
                 onClick={() => setEdit(true)}
-                className="flex items-center gap-2 border border-gray-300 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium transition-colors mt-4 md:mt-0 cursor-pointer"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
               >
-                <PenBox className="w-4 h-4" />
+                <PenBox className="size-4" />
                 Edit
               </button>
-            )}
+            ) : (
+              <div className="flex w-full flex-wrap gap-2 md:w-auto md:justify-end">
+                {connectionStatus === "connected" && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/messages/${profileId}`)}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                  >
+                    <MessageCircle className="size-4" />
+                    Message
+                  </button>
+                )}
 
-            {/* Actions */}
-            {profileId && (
-              <div className="absolute right-4 md:right-10">
-                {/* Desktop Buttons */}
-                <div className="hidden md:flex flex-col gap-2">
-                  {isConnected ? (
-                    <>
-                      <div
-                        className="flex items-center justify-center gap-1 bg-blue-400 rounded-xl p-2 text-white cursor-pointer"
-                        onClick={() => navigate(`/messages/${profileId}`)}
-                      >
-                        <MessageCircle />
-                        Message
-                      </div>
+                {connectionStatus === "incoming_pending" && (
+                  <button
+                    type="button"
+                    disabled={Boolean(activeAction)}
+                    onClick={acceptConnectionRequest}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <ActionIcon action="accept">
+                      <Check className="size-4" />
+                    </ActionIcon>
+                    Accept
+                  </button>
+                )}
 
-                      <div
-                        className="flex items-center gap-1 bg-red-400 rounded-xl p-2 text-white cursor-pointer"
-                        onClick={disconnect}
-                      >
-                        <UserRoundX />
-                        Disconnect
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div
-                        className="flex items-center justify-center gap-1 bg-blue-400 rounded-xl p-2 text-white cursor-pointer"
-                        onClick={handleConnectionRequest}
-                      >
-                        {isPendingRequest ? "Pending" : "Connect"}
-                      </div>
+                {connectionStatus === "outgoing_pending" && (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-700"
+                  >
+                    <Clock3 className="size-4" />
+                    Pending
+                  </button>
+                )}
 
-                      <div
-                        className={`flex items-center justify-center gap-2 rounded-xl p-2 text-white cursor-pointer ${
-                          isFollowing ? "bg-red-400" : "bg-blue-400"
-                        }`}
-                        onClick={toggleFollow}
-                      >
-                        {isFollowing ? (
-                          <>
-                            <UserMinus /> UnFollow
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus /> Follow
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                {connectionStatus === "none" && (
+                  <button
+                    type="button"
+                    disabled={Boolean(activeAction)}
+                    onClick={handleConnectionRequest}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <ActionIcon action="connect">
+                      <UserPlus className="size-4" />
+                    </ActionIcon>
+                    Connect
+                  </button>
+                )}
 
-                {/* Mobile Menu */}
-                <MobileMenu
-                  isConnected={isConnected}
-                  isFollowing={isFollowing}
-                  isPendingRequest={isPendingRequest}
-                  handleConnectionRequest={handleConnectionRequest}
-                  disconnect={disconnect}
-                  toggleFollow={toggleFollow}
-                  navigate={navigate}
-                  profileId={profileId}
-                />
+                <button
+                  type="button"
+                  disabled={Boolean(activeAction)}
+                  onClick={toggleFollow}
+                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    isFollowing
+                      ? "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                      : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                  }`}
+                >
+                  <ActionIcon action="follow">
+                    {isFollowing ? (
+                      <UserMinus className="size-4" />
+                    ) : (
+                      <UserPlus className="size-4" />
+                    )}
+                  </ActionIcon>
+                  {isFollowing ? "Following" : "Follow"}
+                </button>
+
+                {connectionStatus === "connected" && (
+                  <button
+                    type="button"
+                    title="Disconnect"
+                    disabled={Boolean(activeAction)}
+                    onClick={disconnect}
+                    className="inline-flex size-10 items-center justify-center rounded-md border border-red-200 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <ActionIcon action="disconnect">
+                      <UserRoundX className="size-4" />
+                    </ActionIcon>
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          {/* Bio */}
-          <p className="text-gray-700 text-sm max-w-md mt-4">
-            {user.bio}
-          </p>
+          <p className="mt-4 max-w-md text-sm text-gray-700">{user.bio}</p>
 
-          {/* Info */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-500 mt-4">
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-500">
             <span className="flex items-center gap-1.5">
-              <MapPin className="w-4 h-4" />
+              <MapPin className="size-4" />
               {user.location || "Add Location"}
             </span>
             <span className="flex items-center gap-1.5">
-              <Calendar className="w-4 h-4" />
-              Joined{" "}
-              <span className="font-medium">
-                {moment(user.createdAt).fromNow()}
-              </span>
+              <Calendar className="size-4" />
+              Joined <span className="font-medium">{moment(user.createdAt).fromNow()}</span>
             </span>
           </div>
 
-          {/* Stats */}
-          <div className="flex items-center gap-6 mt-6 border-t border-gray-200 pt-4">
+          <div className="mt-6 flex items-center gap-6 border-t border-gray-200 pt-4">
             <div>
-              <span className="sm:text-xl font-bold text-gray-900">
-                {posts.length}
-              </span>
-              <span className="text-xs sm:text-sm text-gray-500 ml-1.5">
-                Posts
-              </span>
+              <span className="font-bold text-gray-900 sm:text-xl">{posts.length}</span>
+              <span className="ml-1.5 text-xs text-gray-500 sm:text-sm">Posts</span>
             </div>
             <div>
-              <span className="sm:text-xl font-bold text-gray-900">
-                {user.followers.length}
-              </span>
-              <span className="text-xs sm:text-sm text-gray-500 ml-1.5">
-                Followers
-              </span>
+              <span className="font-bold text-gray-900 sm:text-xl">{user.followers.length}</span>
+              <span className="ml-1.5 text-xs text-gray-500 sm:text-sm">Followers</span>
             </div>
             <div>
-              <span className="sm:text-xl font-bold text-gray-900">
-                {user.following.length}
-              </span>
-              <span className="text-xs sm:text-sm text-gray-500 ml-1.5">
-                Following
-              </span>
+              <span className="font-bold text-gray-900 sm:text-xl">{user.following.length}</span>
+              <span className="ml-1.5 text-xs text-gray-500 sm:text-sm">Following</span>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-};
-
-// Mobile Dropdown Component
-const MobileMenu = ({
-  isConnected,
-  isFollowing,
-  isPendingRequest,
-  handleConnectionRequest,
-  disconnect,
-  toggleFollow,
-  navigate,
-  profileId,
-}) => {
-  const [showMenu, setShowMenu] = useState(false);
-
-  return (
-    <div className="md:hidden relative">
-      <div
-        className="p-2 rounded-full hover:bg-gray-200 cursor-pointer"
-        onClick={() => setShowMenu((prev) => !prev)}
-      >
-        <MoreVertical />
-      </div>
-
-      {showMenu && (
-        <div className="absolute right-0 mt-2 w-40 bg-white shadow-lg rounded-lg border z-50">
-          {isConnected ? (
-            <>
-              <div
-                className="p-2 hover:bg-gray-100 cursor-pointer"
-                onClick={() => {
-                  navigate(`/messages/${profileId}`);
-                  setShowMenu(false);
-                }}
-              >
-                Message
-              </div>
-
-              <div
-                className="p-2 hover:bg-gray-100 text-red-500 cursor-pointer"
-                onClick={() => {
-                  disconnect();
-                  setShowMenu(false);
-                }}
-              >
-                Disconnect
-              </div>
-            </>
-          ) : (
-            <>
-              <div
-                className="p-2 hover:bg-gray-100 cursor-pointer"
-                onClick={() => {
-                  handleConnectionRequest();
-                  setShowMenu(false);
-                }}
-              >
-                {isPendingRequest ? "Pending" : "Connect"}
-              </div>
-
-              <div
-                className="p-2 hover:bg-gray-100 cursor-pointer"
-                onClick={() => {
-                  toggleFollow();
-                  setShowMenu(false);
-                }}
-              >
-                {isFollowing ? "Unfollow" : "Follow"}
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 };

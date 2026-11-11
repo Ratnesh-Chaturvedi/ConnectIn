@@ -21,20 +21,20 @@ const CreatePost = () => {
   const handleSubmit =async ()=>{
   
     const token=await getToken()
-    if(!images && !content){
-      return toast.error("Please add altleast text or 1 image ")
+    if ((!images || images.length === 0) && !content.trim()) {
+      return toast.error("Please add at least text or 1 image");
     }
     setLoading(true)
 
-    const postType=images && content ?"text_with_image":images.length?"image":"text"
+    const postType = (images.length > 0 && content.trim()) ? "text_with_image" : (images.length > 0 ? "image" : "text");
 
 try {
   const formData=new FormData()
   formData.append('content',content)
   formData.append('post_type',postType)
-  images.map((img)=>{
-   formData.append("images",img) 
-  })
+  images.forEach((img) => {
+        formData.append("images", img);
+      });
 
   const {data}=await api.post("/api/post/addpost",formData,{headers:{Authorization:`Bearer ${token}`}})
 
@@ -47,11 +47,10 @@ try {
   }
   
 } catch (error) {
-  toast.error(error.message)
-  throw new Error(error.message)
-}
-
-setLoading(false)
+      toast.error(error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
   
   }
 

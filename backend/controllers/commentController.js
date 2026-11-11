@@ -1,5 +1,6 @@
 import Comment from "../models/comment.model.js";
 import Post from "../models/post.model.js";
+import { emitToPost } from "../realtime/socket.js";
 
 const addComment = async (req, res) => {
   try {
@@ -32,6 +33,7 @@ const addComment = async (req, res) => {
       "user",
       "full_name username profile_picture ",
     );
+    emitToPost(postId, "comment:created", commentData);
     return res.status(201).json({ success: true, commentData,message:"Comment added" });
   } catch (error) {
     console.log(error);
@@ -60,7 +62,7 @@ const deleteComment = async (req, res) => {
       const postId = comment.post; // Get the associated post ID
       //check that the comment is from the user so that each user can only delete their comment only
 
-    if(comment.user!==userId){
+    if(comment.user.toString() !== userId){
       return res.status(403).json({ success: false, message: "Unauthorized to delete this comment" });
     }
   
@@ -71,6 +73,7 @@ const deleteComment = async (req, res) => {
       $pull: { comments: commentId }
     });
 
+    emitToPost(postId, "comment:deleted", { commentId });
     return res.status(200).json({ success: true, message: "Comment deleted" });
   } catch (error) {
     console.log(error);
@@ -94,7 +97,7 @@ const getComments =async (req,res)=>{
     options: { sort: { createdAt: -1 } },
     populate: {
       path: "user",
-      select: "full_name"
+      select: "full_name username profile_picture"
     }
   })
     if(!allComments){

@@ -5,9 +5,9 @@ import Storybar from '../components/Storybar';
 import Postcard from '../components/Postcard';
 import RecentMessages from '../components/RecentMessages';
 import { useAuth } from "@clerk/clerk-react";
-import toast from 'react-hot-toast';
 import api from '../api/axios.js';
 import { Outlet } from 'react-router-dom'; // Add this
+import { useRealtimeEvent, useRealtimeRoom } from '../realtime/RealtimeProvider.jsx';
 
 const Feed = () => {
   const { getToken } = useAuth();
@@ -18,6 +18,26 @@ const Feed = () => {
 
   const observerRef = useRef(null);
   const isFetching = useRef(false);
+
+  useRealtimeRoom("feed");
+  useRealtimeEvent("post:created", (post) => {
+    setFeeds((current) =>
+      current.some((item) => item._id === post._id)
+        ? current
+        : [post, ...current],
+    );
+    setSeenPosts((current) => [...new Set([...current, post._id])]);
+  });
+  useRealtimeEvent("post:updated", ({ postId, ...changes }) => {
+    setFeeds((current) =>
+      current.map((post) =>
+        post._id === postId ? { ...post, ...changes } : post,
+      ),
+    );
+  });
+  useRealtimeEvent("post:deleted", ({ postId }) => {
+    setFeeds((current) => current.filter((post) => post._id !== postId));
+  });
 
   const fetchFeed = useCallback(async () => {
     if (isFetching.current || !hasMore) return;
@@ -91,7 +111,14 @@ const Feed = () => {
         <div className='p-4 space-y-6'>
           {feeds.map((post, idx) => (
             <div key={post._id} className="animate-fadeInUp" style={{ animationDelay: `${idx * 0.05}s` }}>
-              <Postcard post={post} />
+              <Postcard
+                post={post}
+                onDelete={(postId) =>
+                  setFeeds((current) =>
+                    current.filter((item) => item._id !== postId),
+                  )
+                }
+              />
             </div>
           ))}
         </div>

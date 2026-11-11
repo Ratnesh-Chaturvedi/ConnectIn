@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
+import { createServer } from "http";
 
 import connectDB from "./config/mongdb.js";
 // clerk
@@ -13,6 +14,7 @@ import postRouter from "./routes/postRoutes.js";
 import storyRouter from "./routes/storyRoutes.js";
 import messageRouter from "./routes/messageRoutes.js";
 import commentRouter from "./routes/commentRoutes.js";
+import { initializeSocketServer } from "./realtime/socket.js";
 
 const app = express();
 app.use(express.json());
@@ -50,7 +52,10 @@ app.use("/api/comment",commentRouter)
 
 
 const PORT = process.env.PORT || 3000;
+const server = createServer(app);
 
-app.listen(PORT, () => {
+await initializeSocketServer(server);
+
+server.listen(PORT, () => {
   console.log(`server is running on port ${PORT}`);
 });

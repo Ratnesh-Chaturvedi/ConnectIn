@@ -8,18 +8,22 @@ import { useSelector } from 'react-redux'
 import { useAuth } from '@clerk/clerk-react'
 import api from '../api/axios.js'
 import toast from "react-hot-toast"
-import { useEffect } from 'react'
+import { useRealtimeEvent } from '../realtime/RealtimeProvider.jsx'
 
 
-const Postcard = ({post}) => {
+const Postcard = ({post, onDelete}) => {
     const {getToken}=useAuth()
     const navigate =useNavigate()
   
-    const postWithHashtag=post.content.replace(/(#\w+)/g, '<span class="text-indigo-500">$1</span>')
+    const postWithHashtag=(post.content || "").replace(/(#\w+)/g, '<span class="text-indigo-500">$1</span>')
     
  const [likes,setLikes]=useState(post.likes_count)
  const currentUser=useSelector((state)=>state.user.value)
  const isOwner = currentUser?._id === (post.user?._id || post.user);
+
+ useRealtimeEvent("post:updated", ({ postId, likes_count }) => {
+   if (postId === post._id && likes_count) setLikes(likes_count);
+ });
 
 
 const toggleLike = async(post)=>{
@@ -28,13 +32,7 @@ const toggleLike = async(post)=>{
     const {data}=await api.patch("/api/post/togglelike",{postId:post._id},{headers:{Authorization:`Bearer ${token}`}})
     if(data.success){
         toast.success(data.message)
-        setLikes((prev)=>{
-            if(prev.includes(currentUser._id)){
-                return prev.filter(id=>id!==currentUser._id)
-            }else {
-                return [...prev,currentUser._id]
-            }
-        })
+        setLikes(data.likes_count || [])
     }
     else {
         toast.error(data.message)
@@ -68,9 +66,7 @@ const deletePost =async (postId)=>{
     });
     if(data.success){
       toast.success(data.message)
-      if (setPosts) {
-          setPosts((prevPosts) => prevPosts.filter((p) => p._id !== postId));
-        }
+      onDelete?.(postId)
     }
     else {
       toast.error(data.message)
@@ -135,7 +131,7 @@ dangerouslySetInnerHTML={{__html:postWithHashtag}}
 <div className='flex items-center gap-4 text-gray-600 text-sm  pt-2  border-t border-gray-300'>
   <div className='flex items-center gap-1'>
     <Heart  
-      className={`w-4 h-4 cursor-pointer ${likes.includes(currentUser._id) &&"text-red-500 fill-red-500"}`}  
+      className={`w-4 h-4 cursor-pointer ${likes.includes(currentUser?._id) &&"text-red-500 fill-red-500"}`}
       onClick={()=>toggleLike(post)}
     /> 
     <span>{likes.length}</span>

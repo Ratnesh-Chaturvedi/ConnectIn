@@ -4,6 +4,7 @@ import Connection from "../models/connection.model.js";
 import sendEmail from "../config/nodeMailer.js";
 import Story from "../models/story.model.js";
 import Message from "../models/message.model.js";
+import { emitToUsers } from "../realtime/socket.js";
 
 // Create a client to send and receive events
 export const inngest = new Inngest({ id: "connectin" });
@@ -140,7 +141,18 @@ const deleteStoryAfter24Hour=inngest.createFunction(
     const in24hours=new Date(Date.now()+24*60*60*1000);
     await step.sleepUntil("wait-for-24-hour",in24hours)
     await step.run('delete-story',async()=>{
-      await Story.findByIdAndDelete(storyId)
+      const story = await Story.findById(storyId);
+      if (!story) return ({message:"Story already deleted"})
+
+      const author = await User.findById(story.user).select(
+        "connections followers",
+      );
+      await story.deleteOne()
+      emitToUsers(
+        [story.user, ...(author?.connections || []), ...(author?.followers || [])],
+        "story:deleted",
+        { storyId: story._id },
+      );
       return ({message:"Story Deleted"})
     })
   }

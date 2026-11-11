@@ -1,30 +1,34 @@
-import mongoose, { Schema} from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
-
-const commentSchema=new Schema({
-
-  user:{
-    type:String,
-    ref:"User",
-    required:true,
-  },
-  content:{
-    type:String,
-    required:true
-  },
+const commentSchema = new Schema(
+  {
+    user: {
+      type: String,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    content: {
+      type: String,
+      required: true,
+    },
     post: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Post"
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Post",
+      required: true,
+      index: true,
+    },
+    likes_count: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "Likes",
+      },
+    ],
   },
-  likes_count:[
-    {type:Schema.Types.ObjectId,
-      ref:"Likes"
-    }
-  ]
-  
+  { timestamps: true },
+);
 
-},{timestamps:true})
+commentSchema.index({ post: 1, createdAt: -1 });
 
-
-const  Comment=mongoose.model("Comment",commentSchema)
-export default Comment
+const Comment = mongoose.model("Comment", commentSchema);
+export default Comment;

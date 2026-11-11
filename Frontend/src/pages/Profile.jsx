@@ -1,6 +1,5 @@
-import React, { act, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { dummyPostsData, dummyUserData } from "../assets/assets";
 import Loading from "../components/Loading";
 import UserProgfileInfo from "../components/UserProgfileInfo";
 import Postcard from "../components/Postcard";
@@ -10,6 +9,7 @@ import { useSelector } from "react-redux";
 import  {useAuth} from "@clerk/clerk-react"
 import toast from "react-hot-toast";
 import api from "../api/axios.js"
+import { useRealtimeEvent, useRealtimeRoom } from "../realtime/RealtimeProvider.jsx";
 
 const Profile = () => {
 
@@ -21,13 +21,15 @@ const Profile = () => {
   const [posts, setPosts] = useState([]);
   const [activeTab, setActiveTab] = useState("posts");
   const [edit, setEdit] = useState(false);
+  const targetProfileId = profileId || currentUser?._id;
 
 
 
-  const fetchUser = async (profileId) => {
+  const fetchUser = useCallback(async (id) => {
+    if (!id) return;
     const token=await getToken()
     try {
-      const {data}=await api.post("/api/user/profile",{profileId},{headers:{Authorization:`Bearer ${token}`}})
+      const {data}=await api.post("/api/user/profile",{profileId:id},{headers:{Authorization:`Bearer ${token}`}})
       // console.log("data:",data)
       if(data.success){
         // toast.success(data.message)
@@ -39,15 +41,40 @@ const Profile = () => {
     } catch (error) {
       toast.error(error.message)
     }
-  };
+  }, [getToken]);
+
+  useRealtimeRoom(targetProfileId ? `profile:${targetProfileId}` : null);
+  useRealtimeEvent("profile:updated", (updatedUser) => {
+    if (updatedUser._id === targetProfileId) setUser(updatedUser);
+  });
+  useRealtimeEvent("social:updated", ({ userIds }) => {
+    if (userIds.includes(targetProfileId)) fetchUser(targetProfileId);
+  });
+  useRealtimeEvent("post:created", (post) => {
+    const authorId = post.user?._id || post.user;
+    if (authorId === targetProfileId) {
+      setPosts((current) =>
+        current.some((item) => item._id === post._id)
+          ? current
+          : [post, ...current],
+      );
+    }
+  });
+  useRealtimeEvent("post:updated", ({ postId, ...changes }) => {
+    setPosts((current) =>
+      current.map((post) =>
+        post._id === postId ? { ...post, ...changes } : post,
+      ),
+    );
+  });
+  useRealtimeEvent("post:deleted", ({ postId }) => {
+    setPosts((current) => current.filter((post) => post._id !== postId));
+  });
+  useRealtimeEvent("connect", () => fetchUser(targetProfileId));
   useEffect(() => {
-    if(profileId){
-      fetchUser(profileId)
-    }
-    else {
-      fetchUser(currentUser._id)
-    }
-  }, [profileId,currentUser] );
+    const timer = window.setTimeout(() => fetchUser(targetProfileId), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchUser, targetProfileId] );
 
   return user ? (
     <div className="relative h-full  overflow-y-scroll bg-gray-50 p-6">
@@ -90,7 +117,7 @@ const Profile = () => {
           {/* posts */}
            {activeTab==="posts" && (
             <div className="mt-6 flex  flex-col items-center gap-6">
-              {posts.map((post)=><Postcard key={post._id} post={post} setPosts={setPosts}/>)}
+              {posts.map((post)=><Postcard key={post._id} post={post} onDelete={(postId) => setPosts((current) => current.filter((item) => item._id !== postId))}/>)}
             </div>
            )}
 

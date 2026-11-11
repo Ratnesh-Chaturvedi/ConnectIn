@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { dummyStoriesData } from "../assets/assets";
 import { Plus } from "lucide-react";
 import moment from "moment";
 import StoryModal from "./StoryModal";
@@ -7,12 +6,24 @@ import Storyviewer from "./Storyviewer";
 import { useAuth } from "@clerk/clerk-react";
 import api from "../api/axios.js";
 import toast from "react-hot-toast"
+import { useRealtimeEvent } from "../realtime/RealtimeProvider.jsx";
 
 const Storybar = () => {
   const {getToken}=useAuth()
   const [stories, setStories] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [viewStory, setViewStory] = useState(null);
+  useRealtimeEvent("story:created", (story) => {
+    setStories((current) =>
+      current.some((item) => item._id === story._id)
+        ? current
+        : [story, ...current],
+    );
+  });
+  useRealtimeEvent("story:deleted", ({ storyId }) => {
+    setStories((current) => current.filter((story) => story._id !== storyId));
+    setViewStory((current) => (current?._id === storyId ? null : current));
+  });
   const fetchStory = async () => {
 
     const token=await getToken()
@@ -35,7 +46,8 @@ const Storybar = () => {
     }
   };
   useEffect(() => {
-    fetchStory();
+    const timer = window.setTimeout(fetchStory, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   return (
