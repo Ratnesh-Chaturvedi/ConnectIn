@@ -1,6 +1,7 @@
 import fs from "fs";
 import User from "../models/user.model.js";
 import { ApiError } from "../utils/apiError.js";
+import { clerkClient } from "@clerk/express";
 
 import imagekit from "../config/imageKit.js";
 import Connection from "../models/connection.model.js";
@@ -15,6 +16,44 @@ const emitSocialChange = (userIds) => {
 };
 
 
+export const getOrCreateUser = async (userId) => {
+  if (!userId) return null;
+  let user = await User.findById(userId);
+  if (user) return user;
+
+  try {
+    const clerkUser = await clerkClient.users.getUser(userId);
+    if (clerkUser) {
+      const email = clerkUser.emailAddresses?.[0]?.emailAddress || "";
+      let username =
+        clerkUser.username ||
+        (email ? email.split("@")[0] : `user_${Date.now()}`);
+
+      const existingUser = await User.findOne({ username });
+      if (existingUser) {
+        username = `${username}${Math.floor(Math.random() * 10000)}`;
+      }
+
+      const fullName =
+        [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
+        username;
+
+      user = await User.create({
+        _id: userId,
+        full_name: fullName,
+        email,
+        profile_picture: clerkUser.imageUrl || "",
+        username,
+      });
+      console.log("Auto-created user from Clerk in MongoDB:", user.username);
+      return user;
+    }
+  } catch (clerkError) {
+    console.error("Clerk auto-sync error:", clerkError.message);
+  }
+  return null;
+};
+
 // controller to get the userData using userID
 const getUserData = async (req, res) => {
   try {
@@ -23,7 +62,8 @@ const getUserData = async (req, res) => {
     if (!userId) {
       throw new ApiError(401, "Unauthorized: No userId found");
     }
-    const userData = await User.findById(userId);
+    const userData = await getOrCreateUser(userId);
+
     if (!userData) {
       throw new ApiError(400, "Error User not found");
     }
@@ -85,6 +125,7 @@ const updateUserData = async (req, res) => {
       }
 
       updatedData.profile_picture = response.url;
+      try { fs.unlinkSync(profile.path); } catch (_) {}
     }
 
     if (cover) {
@@ -104,6 +145,7 @@ const updateUserData = async (req, res) => {
 
       // 🔥 FIX: Use response.url directly
       updatedData.cover_photo = response.url;
+      try { fs.unlinkSync(cover.path); } catch (_) {}
     }
 
     const updatedUser = await User.findByIdAndUpdate(userId, updatedData, {
@@ -303,38 +345,46 @@ const sendConnectionRequest = async (req, res) => {
 const getAllConnections = async (req, res) => {
   try {
     const { userId } = req.auth();
-    const user = await User.findById(userId).populate(
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    let user = await User.findById(userId).populate(
       "connections followers following",
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      user = await getOrCreateUser(userId);
+      if (user) {
+        user = await User.findById(userId).populate(
+          "connections followers following",
+        );
+      }
     }
 
-    const connections = user.connections;
-    const followers = user.followers;
-    const following = user.following;
+    const connections = user?.connections || [];
+    const followers = user?.followers || [];
+    const following = user?.following || [];
 
-    const pendingConnection = (
-      await Connection.find({ to_user_id: userId, status: "pending" }).populate(
-        "from_user_id",
-      )
-    ).map((connection) => connection.from_user_id);
+    const pendingConnection = user
+      ? (
+          await Connection.find({ to_user_id: userId, status: "pending" }).populate(
+            "from_user_id",
+          )
+        ).map((connection) => connection.from_user_id)
+      : [];
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       connections,
       followers,
       following,
       pendingConnection,
-      message:"Connection is Pending"
+      message: "Connections fetched successfully",
     });
   } catch (error) {
     console.log(error);
-    return res.status(400).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 

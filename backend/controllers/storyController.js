@@ -71,7 +71,9 @@ const getStory = async (req, res) => {
     const { userId } = req.auth();
     const user = await User.findById(userId).select("connections following").lean();
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(200)
+        .json({ success: true, message: "Stories fetched", stories: [] });
     }
     const userIds = [userId, ...(user.connections || []), ...(user.following || [])];
     const stories = await Story.find({ user: { $in: userIds } })
